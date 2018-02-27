@@ -1,0 +1,211 @@
+---
+title: "Distribution analysis and KNN in R"
+author: "Andrew Mauro"
+date: "January 26, 2018"
+output: html_document
+---
+
+Problem statement: take a completely unlabeled/unnamed data set and organize it by (1) Evaluating the distributions of each variable and (2) performing KNN analysis to determine whether there are any natural groupings to the data and analyzing the results.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+rm(list = ls())
+
+#load
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(ggcorrplot)
+library(cowplot)
+library(clValid)
+library(caret)
+
+data <- fread("data set 2.csv")
+
+str(data)
+summary(data)
+
+```
+
+
+A. Visualizations
+
+Density Curves and Correlation Plot
+
+```{r}
+
+#Density Curves
+longData <- data %>% select(-V1) %>% gather(key = observation, value = measurement)
+densityPlot <- ggplot(longData,aes(x=measurement, fill=observation)) + 
+                  geom_density(alpha=0.5)
+
+
+#correlation plot
+corr <- cor(select(data, - V1))
+corrPlot <- ggcorrplot(corr)
+
+densityPlot
+corrPlot
+
+
+```
+
+
+```{r}
+
+longData <- data %>% select(-V1) %>% gather(key = observation, value = measurement)
+#look at each distrib individually
+x1 <- ggplot(filter(longData, observation == "X1"),aes(x=measurement, fill=observation)) + geom_density(alpha=0.5)
+#bi-modal with peaks at
+x2 <- ggplot(filter(longData, observation == "X2"),aes(x=measurement, fill=observation)) + geom_density(alpha=0.5)
+x3 <- ggplot(filter(longData, observation == "X3"),aes(x=measurement, fill=observation)) + geom_density(alpha=0.5)
+x4 <- ggplot(filter(longData, observation == "X4"),aes(x=measurement, fill=observation)) + geom_density(alpha=0.5)
+x5 <- ggplot(filter(longData, observation == "X5"),aes(x=measurement, fill=observation)) + geom_density(alpha=0.5)
+x6 <- ggplot(filter(longData, observation == "X6"),aes(x=measurement, fill=observation)) + geom_density(alpha=0.5)
+x7 <- ggplot(filter(longData, observation == "X7"),aes(x=measurement, fill=observation)) + geom_density(alpha=0.5)
+x8 <- ggplot(filter(longData, observation == "X8"),aes(x=measurement, fill=observation)) + geom_density(alpha=0.5)
+x9 <- ggplot(filter(longData, observation == "X9"),aes(x=measurement, fill=observation)) + geom_density(alpha=0.5)
+x10 <- ggplot(filter(longData, observation == "X10"),aes(x=measurement, fill=observation)) + geom_density(alpha=0.5)
+
+plot_grid(x1, x2, 
+          x3, x4, 
+          x5,x6, 
+          x7, x8, 
+          x9, x10,
+          align = 'h', ncol = 2)
+```
+
+'X2', 'X4', 'X5', 'X8', 'X9', 'X10'
+
+'X1', 'X3', 'X6', 'X7'
+
+
+
+B. KNN Function
+
+
+```{r}
+
+set.seed(3456)
+
+feat <- select(data, - V1)
+
+#normalize data (best practice for knn)
+preprocessParams <- preProcess(feat[,1:10], method=c("range"))
+# summarize transform parameters
+print(preprocessParams)
+# transform the dataset using the parameters
+feat <- predict(preprocessParams, feat[,1:10])
+
+#scale data
+
+
+#loop clusters 1-10 and calculate min, max, avg, sd cluster for each
+
+determineClusters <- function(features, nMax = 10, obtain = "results"){
+
+results <- data.frame()
+
+for(i in 2:nMax){
+
+  featClust <- kmeans(features, nstart = 20, centers = i)
+
+  features[, "cluster"] <- featClust$cluster
+  features[, paste0("cluster_", i)] <- featClust$cluster
+  
+
+  counts <- features %>% group_by(cluster) %>% summarise(count = n())
+  
+  info <- data.frame(n = i, mean = mean(counts$count), sd = sd(counts$count), 
+                     range = max(counts$count) - min(counts$count),
+                     totss = featClust$totss, withinss = sum(featClust$withinss),
+                     ratio = sum(featClust$withinss) / featClust$totss, 
+                     betweenss = featClust$betweenss)
+  
+  results <- rbind(results, info)
+  
+}
+
+if(obtain == "results") {
+  return(results)
+} else if(obtain == "features"){
+  return(features)
+} else print("error bro")
+
+}
+
+results <- determineClusters(feat, nMax = 20,obtain = "results")
+
+#look at results
+results
+
+#plots
+
+#n and withinss
+ggplot(filter(results, n < 11), aes(x= n, y = withinss)) + 
+  geom_line() +
+  labs(title = "Within Sum of Squares as 'n' Increases")
+
+
+#ratio
+ggplot(filter(results, n < 11), aes(x= n, y = ratio)) + 
+  geom_line() +
+  labs(title = "WSS / TSS 'n' Increases")
+
+#select our k = n cluster to assign observations to groups
+
+featClust <- kmeans(feat, nstart = 20, centers = 4)
+
+data$cluster <- featClust$cluster
+  
+data %>% group_by(cluster) %>% summarise(count = n())
+
+#write.csv(data, "data 2 - clusters.csv")
+```
+
+Challenger Model: Help us decide whether 2 or 4 is correct
+
+```{r}
+
+set.seed(3456)
+
+feat <- select(data, - V1)
+
+#normalize data (best practice for knn)
+preprocessParams <- preProcess(feat[,1:10], method=c("range"))
+# summarize transform parameters
+print(preprocessParams)
+# transform the dataset using the parameters
+feat <- predict(preprocessParams, feat[,1:10])
+
+# Apply dist() 
+featDist <- dist(feat)
+
+# Apply hclust() to run_dist: run_single
+featClust <- hclust(featDist, method = "average")
+
+featClust$labels <- data$V1
+
+# Check cluster vlues
+featClust2 <- cutree(featClust, k = 2)
+featClust4 <- cutree(featClust, k = 4)
+featClust5 <- cutree(featClust, k = 5)
+
+#calculate intercluster distances using dunn's index
+#ratio between the minimum intercluster distance and the maximum 
+##intracluster distance.
+
+dunn2 <- dunn(Data = feat, clusters = featClust2)
+dunn4 <- dunn(Data = feat, clusters = featClust4)
+dunn5 <- dunn(Data = feat, clusters = featClust5)
+
+dunn4 < dunn2 #TRUE
+dunn4 < dunn5 #TRUE
+
+#-- The four cluster model has a smaller ratio of its minimum inter cluster distance
+##to its maximum intracluster distance, meaning it produces more distinct clusters
+##Our Hierarchical clustering results thus support our k-means clustering conclusion.
+
+```
